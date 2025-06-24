@@ -2,10 +2,11 @@ services:
   - type: web
     name: workwear-bot
     env: python
-    runtime: python
     plan: free
     region: frankfurt
-    buildCommand: ""
+    buildCommand: |
+      curl -sSL https://install.python-poetry.org | POETRY_HOME=/opt/poetry python3.12 -
+      pip install -r requirements.txt
     startCommand: "python bot.py"
     envVars:
       - key: BOT_TOKEN
