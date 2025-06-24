@@ -1,14 +1,30 @@
-
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import os
+import logging
+from aiohttp import web
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+)
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is not set")
+
+WEBHOOK_PATH = f"/{TOKEN}"
+PORT = int(os.environ.get("PORT", "8443"))  # Render обычно даёт порт в $PORT
 
 catalog = {
     "jacket": "Рабочая куртка утеплённая",
     "overalls": "Комбинезон защитный",
-    "boots": "Ботинки рабочие"
+    "boots": "Ботинки рабочие",
 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -50,11 +66,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         product_name = catalog.get(product_key, "Неизвестный товар")
         await query.message.reply_text(f"Ваш заказ на {product_name} принят! Менеджер свяжется с вами.")
 
-def main():
+async def handle_update(request: web.Request):
+    data = await request.json()
+    update = Update.de_json(data, application.bot)
+    await application.update_queue.put(update)
+    return web.Response(text="ok")
+
+async def main():
+    global application
     application = Application.builder().token(TOKEN).build()
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
-    application.run_polling()
+
+    # Установка webhook
+    webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}{WEBHOOK_PATH}"
+    await application.bot.set_webhook(webhook_url)
+    logger.info(f"Webhook set to {webhook_url}")
+
+    app = web.Application()
+    app.router.add_post(WEBHOOK_PATH, handle_update)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logger.info(f"Webhook server started on port {PORT}")
+
+    # Чтобы приложение не завершилось
+    await application.run_polling()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
